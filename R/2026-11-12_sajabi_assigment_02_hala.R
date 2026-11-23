@@ -1,7 +1,7 @@
 ###1 - OVERVIEW----
 
 #####Question----
-#H ow does the transposable element differ between Trichinella spiralis and Trichinella murrelli in terms of overall repeat abundance, major element class composition, and element length distribution?
+#How does the transposable element differ between Trichinella spiralis and Trichinella murrelli in terms of overall repeat abundance, major element class composition, and element length distribution?
 
 ####Data Access----
 # This code file should run on everyones system assuming they have downloaded the required packages and are in the latest software version. 
@@ -13,77 +13,70 @@
 ####Installation---- 
 #Package installation & load libraries + Data exploration for both species (T. spiralis & T. murrelli)
 
-install.packages("tidyverse")
-install.packages("permute")
-install.packages("patchwork")
-
-setwd("./R/")
-
-rm(list = ls())
-
 library(tidyverse)
-conflicted::conflict_prefer("filter", "dplyr")
-library(ggplot2)
-library(dplyr)
-library(stringr)
 library(patchwork)
 
-###2 - DATA EXPLORATION---- 
 
-# Data wrangling. We will add a species label to each dataset and then combine them into one master table.
+###2 - Edit 1 - Data Exploration ----
+#Changes:
+#1. Replaced repetitive data exploration and cleaning code with a for loop to improve efficiency and make it easier to add more species.
+#2. Added column validation using setdiff() and stop() to catch missing columns early and prevent errors in downstream analysis (ie. if file is read into script and does not contain the required columns, the loop will terminate)
 
-# Date of Download: October 23, 2026
+files <- c(
+  "T. spiralis" = "../data/trichinella_spiralis_te.csv",
+  "T. murrelli" = "../data/trichinella murrelli_te.csv"
+)
 
-#####trichinella spiralis----
-spiralis_raw <- read_csv("../data/trichinella_spiralis_te.csv")
-spiralis_raw
+# Columns required for analysis
+required_cols <- c("qry_id", "qry_start", "qry_end",
+                   "qry_width", "qry_left",
+                   "matching_class", "perc_div", "sw_score")
 
-# check class
-class(spiralis_raw)
+# Empty list to store cleaned datasets
+ls_data <- list()
 
-# see variables 
-names(spiralis_raw)
+for (i in names(files)) {
+  
+  # Read dataset
+  df <- read_csv(files[[i]])
+  
+  # Check for missing columns so loop terminates if a dataset lacks the info needed for analysis
+  missing_cols <- setdiff(required_cols, names(df))
+  
+  if (length(missing_cols) > 0) {
+    stop(paste("Missing columns in", i, ":",
+               paste(missing_cols, collapse = ", ")))
+  }
+  # Calculate contig length by standardizing qry_left to a positive numeric value before calculating contig length for both species.
+  df <- df |>
+    mutate(
+      qry_left = abs(as.numeric(gsub("[()]", "", qry_left))),
+      contig_length = qry_end + qry_left
+    )
+  # Exploration
+  print(class(df))
+  print(names(df))
+  print(summary(df))
+  print(dim(df))
+  
+  # Select columns and add species label
+  ls_data[[i]] <- df |>
+    select(all_of(required_cols),(contig_length)) |>
+    mutate(species = i)
+}
 
-# see summary
-summary(spiralis_raw)
 
-# check dimensions
-dim(spiralis_raw)
-
-#####trichinella murelli----
-murrelli_raw <- read_csv("../data/trichinella murrelli_te.csv")
-murrelli_raw
-
-# check class
-class(murrelli_raw)
-
-# see variables 
-names(murrelli_raw)
-
-# see summary
-summary(murrelli_raw)
-
-# check dimensions
-dim(murrelli_raw)
-
-###3 - DATA CLEANING---- 
 #####Combination----
 
-spiralis_clean <- spiralis_raw |>
-  select(qry_id, qry_start, qry_end, qry_width, matching_class, perc_div, sw_score) |>
-  mutate(species = "T. spiralis")
+df_tstm <- bind_rows(ls_data)
+unique(df_tstm$species)
+dim(df_tstm)
 
-murrelli_clean <- murrelli_raw |>
-  select(qry_id, qry_start, qry_end, qry_width, matching_class, perc_div, sw_score) |>
-  mutate(species = "T. murrelli")
-
-df_tstm <- bind_rows(spiralis_clean, murrelli_clean)
-
-####Broad Classification----
-# Group detailed repeat annotations into broad, interpretable classes using str_detect() from stingr.
+###3 (OG)- Broad Classification----
+# Group detailed repeat annotations into broad, interpretable classes using str_detect() from stringr.
 
 unique(df_tstm$matching_class)
-
+#Question - Would grouping repeats into broad classes hide potentially important differences between TE families or subfamilies?
 df_tstm <- df_tstm |>
   mutate(
     broad_class = case_when(
@@ -186,8 +179,10 @@ fig2 <- ggplot(te_class_summary, aes(x = broad_class, y = percentage, fill = spe
     legend.position = "top"
   )
 
+# Original Figure 2
 print(fig2)
-ggsave("../output/figure2_class_composition.png", plot = fig2, width = 7, height = 5)
+ggsave("../output/figure2_class_composition.png",
+       plot = fig2, width = 7, height = 5)
 
 ####Contig repeat density----
 
@@ -195,8 +190,7 @@ ggsave("../output/figure2_class_composition.png", plot = fig2, width = 7, height
 #count number of repeats per contig using qry_id
 
 contig_te_counts <- combined_te |>
-  count(species, qry_id)
-
+  count(species, qry_id) #longer contigs will naturally have more TE annotations, may affect raw repeat counts
 #perform Wilcoxon rank-sum test
 
 wilcox_te_res <- wilcox.test(n ~ species, data = contig_te_counts)
@@ -208,10 +202,10 @@ fig3 <- ggplot(contig_te_counts, aes(x = species, y = n, fill = species)) +
   scale_fill_manual(values = c("T. spiralis" = "#2b8cbe", "T. murrelli" = "#e6550d")) +
   annotate("text", x = 1.5, y = max(contig_te_counts$n) * 0.8, label = p_val_label, fontface = "italic") +
   labs(
-    title = "Transposable Element Density per Contig",
-    subtitle = "Comparing spatial TE clustering across assembly contigs",
+    title = "Repeat Annotation Counts per Contig",
+    subtitle = "Non-normalized counts across assembly contigs",
     x = "Species",
-    y = "Number of TEs per Contig (log10 scale)"
+    y = "Repeat Annotations per Contig (log10 scale)"
   ) + 
   theme_classic() +
   theme(legend.position = "none")
@@ -224,160 +218,164 @@ print(wilcox_te_res)
 
 ###
 
-df_percdiv <- aggregate(x = df_tstmclean, by = list(MatchClass = df_tstmclean$broad_class), FUN = function(x) mean(x, na.rm = TRUE))
-summary(df_percdiv)
+###6 - Edit 2 - Length-Normalized TE Density----
+#Normalized repeat counts by contig length to make fairer comparisons between different sized contigs.
+# Get one length per contig
+contig_lengths <- df_tstm |>
+  distinct(species, qry_id, contig_length)
 
-####Divergence----
-# consider comparing and confirming the evolutionary relationship between the two: At a rate of approximately 5% divergence from consensus (Kimura divergence). Under 5% is considered very low divergence. This will address question into which of the two species is more closely resembling the family consensus. Investigation into divergence will shed light into how alike they are (percentage conservation from the same ancestor/reference), whereas lowest divergence will allow for higher resolution into where the divergence starts to occur. 
+stopifnot(
+  nrow(contig_lengths) ==
+    nrow(distinct(contig_lengths, species, qry_id))
+) #checks that each contig has one length, makes life easier when combining data.
 
-dfOverDiv <- combined_te |>
-  filter(!is.na(matching_class)) |>
-  filter(perc_div >= 5) |>
-  group_by(species, matching_class) |>
-  summarize(avgPD = mean(perc_div, na.rm = TRUE)) |>
-  arrange(desc(avgPD)) |>
-  print()
+# Calculate annotations per kilobase
+contig_density <- contig_te_counts |>
+  left_join(contig_lengths, by = c("species", "qry_id")) |>
+  mutate(te_per_kb = n / (contig_length / 1000))
 
-####Conservation----
-# now consider the lists of least divergence and look for similarity
+# Validate calculated densities
+stopifnot(
+  all(is.finite(contig_density$te_per_kb)),
+  all(contig_density$contig_length > 0)
+)
 
-dfUnderDiv <- combined_te |>
-  filter(!is.na(matching_class)) |>
-  filter(perc_div <= 5) |>
-  group_by(species, matching_class) |>
-  summarize(avgPD = mean(perc_div, na.rm = TRUE)) |> ungroup() |>
-  arrange(avgPD) |>
-  print()
+# Compare species
+density_summary <- contig_density |>
+  group_by(species) |>
+  summarise(
+    n_contigs = n(),
+    median_density = median(te_per_kb),
+    mean_density = mean(te_per_kb),
+    .groups = "drop"
+  )
 
-#####Jitter Plot / Test----
+print(density_summary)
 
-ggplot(dfOverDiv, aes(x = avgPD, y = matching_class)) +
-  geom_jitter(aes(color = species), width = 0., height = 0, alpha = 0.7, size = 3) +
-  scale_color_manual(values = c("T. spiralis" = "blue", "T. murrelli" = "red")) +
+# Updated Figure 3
+fig3_updated <- ggplot(
+  contig_density,
+  aes(x = species, y = te_per_kb, fill = species)
+) +
+  geom_boxplot(outlier.alpha = 0.15) +
+  scale_fill_manual(values = c(
+    "T. spiralis" = "#2b8cbe",
+    "T. murrelli" = "#e6550d"
+  )) +
   labs(
-    x = "Average Divergence",
-    y = "Repeat Class",
-    color = "Species"
+    title = "Length-Normalized TE Density by Species",
+    x = "Species",
+    y = "TE Annotations per kb"
   ) +
-  theme_minimal()
+  theme_classic() +
+  theme(legend.position = "none")
 
-# did not enjoy the visualization (sparse + no real direction)
+print(fig3_updated)
 
-#####Dumbbell Plots----
-# attempting dumbbell for better presentation 
+ggsave("../output/figure3_updated.png",
+       plot = fig3_updated, width = 7, height = 5)
 
-spec_colors <- c(
-  "T. spiralis" = "green", 
-  "T. murrelli" = "darkgreen"
+# Statistical comparison
+density_test <- wilcox.test(
+  te_per_kb ~ species,
+  data = contig_density,
+  exact = FALSE
 )
 
-ggAvgDiv <- ggplot(dfOverDiv, aes(x = avgPD,y = matching_class, color = species)) +
-  geom_line(
-    aes(group = matching_class),
-    color = "green",
-    linewidth = 0.8) +
-  geom_point(size = 3) +
-  scale_color_manual(values = spec_colors) +
-  labs(
-    x = "Average Percent Divergence (%)", 
-    y = "Repeat Class", 
-    color = "Species"
-  ) + 
-  theme_minimal() +
-  labs(title = "Most Diverged Classes\nT.spiralis vs. T. murelli (Averaged)")
+print(density_test)
 
-ggAvgDiv
-# ggsave(
-#   filename = "../output/AvgDiv.png",
-#   plot = ggAvgDiv,
-#   width = 8,
-#   height = 8,
-#   units = "in",
-#   dpi = 300
-# )
 
-ggAvgCons <- ggplot(dfUnderDiv, aes(x = avgPD,y = matching_class, color = species)) +
-  geom_line(
-    aes(group = matching_class),
-    color = "green",
-    linewidth = 0.8) +
-  geom_point(size = 3) +
-  scale_color_manual(values = spec_colors) +
-  labs(
-    x = "Average Percent Divergence (%)", 
-    y = "Repeat Class", 
-    color = "Species"
-  ) + 
-  theme_minimal() +
-  labs(title = "Most Highly Conserved Classes\nT.spiralis vs. T. murelli (Averaged)")
-ggAvgCons
+###7 - Edit 3.1 -  Divergence Summary----
+#I wanted to see what the full distribution and class-specific comparison would look like if the 5% divergence split was removed.
 
-AvgDivergence_plot <- ggAvgDiv + ggAvgCons +
-  plot_layout(ncol = 2)
-
-AvgDivergence_plot
-
-ggsave(
-  filename = "../output/fig_2_AvgDiv.png",
-  plot = AvgDivergence_plot,
-  width = 10,
-  height = 8,
-  units = "in",
-  dpi = 300
-)
-
-#####Box plots----
-dfOverDiv2 <- combined_te |>
-  filter(!is.na(matching_class)) |>
-  filter(perc_div >= 5) |>
+# Summarize all divergence values without a 5% cutoff
+div_summary <- combined_te |>
+  filter(!is.na(matching_class), !is.na(perc_div)) |>
   group_by(species, matching_class) |>
-  arrange(desc(perc_div)) |>
-  print()
+  summarise(
+    n = n(),
+    mean_div = mean(perc_div),
+    median_div = median(perc_div),
+    sd_div = sd(perc_div),
+    .groups = "drop"
+  )
 
-dfUnderDiv2 <- combined_te |>
-  filter(!is.na(matching_class)) |>
-  filter(perc_div <= 5) |>
-  group_by(species, matching_class) |>
-  arrange(desc(perc_div)) |>
-  print()
+print(div_summary)
 
-ggDiv <- ggplot() +
-  geom_boxplot(data = dfOverDiv2, aes(x = matching_class, y = perc_div, color = species)) +
+
+# Visualize the full distribution of divergence values
+fig_div_updated <- combined_te |>
+  filter(!is.na(matching_class), !is.na(perc_div)) |>
+  ggplot(aes(x = matching_class,
+             y = perc_div,
+             fill = species)) +
+  geom_boxplot(position = position_dodge(width = 0.8)) +
+  scale_fill_manual(values = c(
+    "T. spiralis" = "#2b8cbe",
+    "T. murrelli" = "#e6550d")) +
   labs(
-    title = "Repeat Divergence by class\n in T. spiralis vs. T.murelli",
+    title = "TE Divergence by Repeat Class",
     x = "Repeat Class",
-    y = "Divergence (%)", 
-    color = "Species"
+    y = "Percent Divergence (%)",
+    fill = "Species"
   ) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme_classic() +
+  coord_flip()+
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top"
+  )
 
-ggCons <- ggplot() +
-  geom_boxplot(data = dfUnderDiv2, aes(x = matching_class, y = perc_div, color = species)) +
-  labs(
-    title = "Repeat Conservation by class\n in T. spiralis vs. T.murelli",
-    x = "Repeat Class",
-    y = "Divergence (%)", 
-    color = "Species"
-  ) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(fig_div_updated)
 
-Divergence_plot <- ggDiv + ggCons +
-  plot_layout(ncol = 2)
+ggsave("../output/figure_divergence_updated.png",
+       plot = fig_div_updated,
+       width = 11, height = 10)
 
-Divergence_plot
-ggsave(
-  filename = "../output/fig_3_Div.png",
-  plot = Divergence_plot,
-  width = 10,
-  height = 8,
-  units = "in",
-  dpi = 300
-)
+##
 
-#####Multi-Variable Bubble Plots----
-# what if we look at sequence length x percent convergence? 
+###8 - Edit 3.2 - Statistical Comparison----
+
+# Keep repeat classes with at least 10 observations from each species (practical cut off, not a guarantee of statistical power)
+div_counts <- combined_te |>
+  filter(!is.na(matching_class), !is.na(perc_div)) |>
+  count(matching_class, species) |>
+  group_by(matching_class) |>
+  filter(n_distinct(species) == 2, all(n >= 10)) |>
+  ungroup()
+
+# Keep only eligible repeat classes
+div_test_data <- combined_te |>
+  filter(!is.na(perc_div)) |>
+  semi_join(div_counts, by = c("matching_class", "species"))
+
+# Run a Wilcoxon test for each repeat class and then correct to account for multiple comparisons.
+div_tests <- div_test_data |>
+  group_by(matching_class) |>
+  summarise(
+    n_spiralis = sum(species == "T. spiralis"),
+    n_murrelli = sum(species == "T. murrelli"),
+    median_spiralis = median(perc_div[species == "T. spiralis"]),
+    median_murrelli = median(perc_div[species == "T. murrelli"]),
+    p_value = wilcox.test(
+      perc_div ~ species,
+      exact = FALSE
+    )$p.value,
+    .groups = "drop"
+  ) |>
+  mutate(
+    median_difference = median_spiralis - median_murrelli,
+    p_adjusted = p.adjust(p_value, method = "BH")
+  ) |>
+  arrange(p_adjusted)
+
+div_tests |>
+  select(matching_class, median_difference, p_value, p_adjusted) |>
+  print(n = Inf)
+#NOTE: Significant results suggest differences in repeat divergence distributions, but do not establish differences in TE age or activity. Non-significant adjusted p-values indicate insufficient evidence of a difference, not that the distributions are identical.
+
+###9 - Multi-Variable Bubble Plots----
+# what if we look at sequence length x percent divergence? 
 
 mv_combined <- ggplot(data = df_tstmclean, aes(x = perc_div, y  = df_telength, size = sw_score, fill = broad_class, shape = species)) +
   geom_point(alpha=0.5, color = "black") +
@@ -444,12 +442,4 @@ ggsave(
   dpi = 300
 )
 
-ggsave(
-  filename = "../output/fig_45_Compb.png",
-  plot = Bubble_plot,
-  width = 20,
-  height = 8,
-  units = "in",
-  dpi = 300
-)
 
